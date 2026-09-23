@@ -1,0 +1,243 @@
+import { useMemo, useRef, useState } from 'react'
+import { extractBrief } from '../core/brief/extract'
+import { applyOps, dimensionOps, type Extraction } from '../core/brief/ops'
+import { runCompliance } from '../core/compliance/rules'
+import { formatMeta } from '../core/dielines'
+import type { Dimensions, PackFormat, ProductRecord } from '../core/types'
+import { PackPreview } from '../three/PackPreview'
+import type { BrandKit } from '../three/artwork'
+
+interface Props {
+  record: ProductRecord
+  dims: Dimensions
+  format: PackFormat
+  kit: BrandKit
+  onBrief: (record: ProductRecord, format: PackFormat, dims: Dimensions) => void
+  onOpenStudio: () => void
+  /** True once a brief has been accepted and there is a pack to look at. */
+  hasPack: boolean
+  onReset: () => void
+}
+
+const STARTERS = [
+  '300 ml immune powder in a stand-up pouch for the UK, brand is Meridian, called Daily Defence. 400 mg magnesium and 10 mg zinc per serving.',
+  '60 capsule jar for the US market, brand Kinetic, called Daily Magnesium. 375 mg magnesium per serving.',
+  'Single-serve stick pack, 30 × 120 mm, for the EU. Brand Lumen, called Morning Electrolyte.',
+]
+
+export function Chat({ record, dims, format, kit, onBrief, onOpenStudio, hasPack, onReset }: Props) {
+  const [text, setText] = useState('')
+  const [extraction, setExtraction] = useState<Extraction | null>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  const report = useMemo(() => (hasPack ? runCompliance(record) : null), [record, hasPack])
+
+  const submit = (brief: string) => {
+    const value = brief.trim()
+    if (!value) return
+    const ex = extractBrief(value)
+    setExtraction(ex)
+
+    const next = applyOps(record, ex.ops)
+    const fmtOp = ex.ops.find((o) => o.op === 'setFormat')
+    const nextFormat = fmtOp && fmtOp.op === 'setFormat' ? fmtOp.value : format
+    const meta = formatMeta(nextFormat)
+    const d = dimensionOps(ex.ops)
+
+    // Dimensions the client gave win; the rest come from the format's defaults,
+    // which are the sizes Supplement Factory actually runs.
+    const nextDims: Dimensions = {
+      ...meta.defaults,
+      ...(d?.width ? { width: d.width } : {}),
+      ...(d?.height ? { height: d.height } : {}),
+      ...(d?.depth ? { depth: d.depth } : {}),
+      ...(d?.diameter ? { diameter: d.diameter } : {}),
+    }
+
+    onBrief({ ...next, format: nextFormat, stage: 'concept' }, nextFormat, nextDims)
+    setText('')
+  }
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      submit(text)
+    }
+  }
+
+  return (
+    <div className="chat">
+      <header className="chat-bar">
+        <span className="wordmark">
+          SF <em>Pack</em>
+        </span>
+        {hasPack && (
+          <div className="chat-bar-actions">
+            <button className="ghost-btn" onClick={onReset}>
+              Start again
+            </button>
+            <button className="solid-btn" onClick={onOpenStudio}>
+              Open in studio
+            </button>
+          </div>
+        )}
+      </header>
+
+      <div className="booth">
+        <div className={`sheet ${hasPack ? 'sheet-filled' : ''}`}>
+          <RegMarks />
+
+          {!hasPack ? (
+            <div className="sheet-inner">
+              <h1 className="ask">What are we packing?</h1>
+              <p className="ask-sub">
+                Describe the product the way you would to a person. Anything you leave out, this
+                will ask for — it will not fill it in for you.
+              </p>
+
+              <div className="prompt">
+                <textarea
+                  ref={inputRef}
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={onKeyDown}
+                  rows={3}
+                  placeholder="300 ml immune powder in a stand-up pouch for the UK…"
+                  aria-label="Describe your product"
+                />
+                <button className="solid-btn send" onClick={() => submit(text)} disabled={!text.trim()}>
+                  Build it
+                </button>
+              </div>
+
+              <ul className="starters">
+                {STARTERS.map((s) => (
+                  <li key={s}>
+                    <button onClick={() => submit(s)}>{s}</button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <div className="sheet-pack">
+              <PackPreview format={format} dims={dims} product={record} kit={kit} showGuides={false} spin />
+            </div>
+          )}
+        </div>
+
+        {hasPack && extraction && (
+          <aside className="readout">
+            <section className="readout-block">
+              <h2>What we read from your brief</h2>
+              <dl className="found">
+                {extraction.ops
+                  .filter((o) => o.op !== 'setDimensions')
+                  .map((o, i) => (
+                    <div key={i}>
+                      <dt>{fieldLabel(o.op)}</dt>
+                      <dd>
+                        {opValue(o)}
+                        <span className="src">from “{o.source}”</span>
+                      </dd>
+                    </div>
+                  ))}
+              </dl>
+            </section>
+
+            {extraction.gaps.length > 0 && (
+              <section className="readout-block">
+                <h2>Still needed before this can go anywhere</h2>
+                <ol className="gaps">
+                  {extraction.gaps.map((g) => (
+                    <li key={g.field}>
+                      <p className="gap-q">{g.question}</p>
+                      <p className="gap-why">{g.why}</p>
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            )}
+
+            {report && (
+              <section className="readout-block">
+                <h2>Compliance, checked live</h2>
+                <p className={`tally ${report.counts.BLOCKER ? 'tally-bad' : 'tally-ok'}`}>
+                  {report.counts.BLOCKER
+                    ? `${report.counts.BLOCKER} blocker${report.counts.BLOCKER === 1 ? '' : 's'}`
+                    : 'No blockers'}
+                  {report.counts.MAJOR > 0 && `, ${report.counts.MAJOR} major`}
+                  {report.counts.QUESTION > 0 && `, ${report.counts.QUESTION} to confirm`}
+                </p>
+                <ul className="pencil">
+                  {report.findings.slice(0, 4).map((f) => (
+                    <li key={f.id}>{f.finding}</li>
+                  ))}
+                </ul>
+                {report.findings.length > 4 && (
+                  <button className="link-btn" onClick={onOpenStudio}>
+                    See all {report.findings.length} in the studio
+                  </button>
+                )}
+              </section>
+            )}
+
+            <div className="handoff">
+              <button className="solid-btn wide" onClick={onOpenStudio}>
+                Open in studio
+              </button>
+              <p>
+                The studio has the die line, the facts panel, the print file and every finding in
+                full.
+              </p>
+            </div>
+          </aside>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Registration marks — the crosshairs a printer lines a sheet up by. */
+function RegMarks() {
+  const mark = (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <circle cx="12" cy="12" r="6" fill="none" stroke="currentColor" strokeWidth="0.8" />
+      <path d="M12 0v9M12 15v9M0 12h9M15 12h9" stroke="currentColor" strokeWidth="0.8" />
+    </svg>
+  )
+  return (
+    <div className="regmarks" aria-hidden="true">
+      <span className="rm rm-tl">{mark}</span>
+      <span className="rm rm-tr">{mark}</span>
+      <span className="rm rm-bl">{mark}</span>
+      <span className="rm rm-br">{mark}</span>
+    </div>
+  )
+}
+
+const LABELS: Record<string, string> = {
+  setBrand: 'Brand',
+  setProductName: 'Product',
+  setMarket: 'Market',
+  setFormat: 'Format',
+  setNetQuantity: 'Net quantity',
+  setServings: 'Servings',
+  setServingSize: 'Serving size',
+  addIngredient: 'Ingredient',
+}
+const fieldLabel = (op: string) => LABELS[op] ?? op
+
+function opValue(o: ReturnType<typeof extractBrief>['ops'][number]): string {
+  switch (o.op) {
+    case 'setNetQuantity':
+      return o.declaredAs
+    case 'addIngredient':
+      return `${o.value.name} — ${o.value.amount} ${o.value.unit}`
+    case 'setFormat':
+      return formatMeta(o.value).label
+    case 'setDimensions':
+      return `${o.width ?? '?'} × ${o.height ?? '?'} mm`
+    default:
+      return String(o.value)
+  }
+}
