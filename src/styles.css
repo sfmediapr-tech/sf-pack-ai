@@ -180,29 +180,9 @@ button { font-family: inherit; cursor: pointer; }
 .dh-crease { stroke: var(--crease); stroke-width: 1; stroke-dasharray: 5 3; }
 .dh-safe { stroke: #c9cec6; stroke-width: 0.7; stroke-dasharray: 3 3; }
 
-/* One orchestrated moment on load: the die line strokes itself on, then the
-   safe areas fade up. Nothing else on the page animates. */
-.dh-cut path, .dh-crease path {
-  stroke-dasharray: 600; stroke-dashoffset: 600;
-  animation: draw 1.6s var(--ease) forwards;
-}
-.dh-crease path { animation-delay: .45s; }
-.dh-safe path { opacity: 0; animation: fade .8s var(--ease) 1.5s forwards; }
-@keyframes draw { to { stroke-dashoffset: 0; } }
-@keyframes fade { to { opacity: 1; } }
-
-.hero-copy > * { animation: rise .7s var(--ease) both; }
-.hero-copy > h1 { animation-delay: .05s; }
-.hero-copy > .lede { animation-delay: .15s; }
-.hero-copy > .hero-cta { animation-delay: .25s; }
-@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-
-@media (prefers-reduced-motion: reduce) {
-  .dh-cut path, .dh-crease path { animation: none; stroke-dashoffset: 0; }
-  .dh-crease path { stroke-dasharray: 5 3; }
-  .dh-safe path { animation: none; opacity: 1; }
-  .hero-copy > * { animation: none; }
-}
+/* The hero's load sequence is a GSAP timeline in Landing.tsx: each path is
+   measured so every line draws at the same speed regardless of length, which
+   a fixed CSS dash array cannot do. Reduced motion is handled there too. */
 
 .problem { background: var(--graphite); color: var(--on-dark); padding: var(--s10) var(--s7); }
 .problem-inner { max-width: 720px; margin: 0 auto; }

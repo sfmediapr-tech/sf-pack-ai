@@ -1,4 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
+import gsap from 'gsap'
+import { useGSAP } from '@gsap/react'
 import { extractBrief } from '../core/brief/extract'
 import { applyOps, dimensionOps, type Extraction } from '../core/brief/ops'
 import { runCompliance } from '../core/compliance/rules'
@@ -7,6 +9,8 @@ import type { Dimensions, PackFormat, ProductRecord } from '../core/types'
 import { PackPreview } from '../three/PackPreview'
 import type { BrandKit } from '../three/artwork'
 import { generateConcept, type ConceptResult } from '../concept/client'
+
+gsap.registerPlugin(useGSAP)
 
 interface Props {
   record: ProductRecord
@@ -33,8 +37,30 @@ export function Chat({ record, dims, format, kit, onBrief, onOpenStudio, hasPack
   const [artState, setArtState] = useState<'idle' | 'working' | 'done' | 'unavailable'>('idle')
   const [artNote, setArtNote] = useState('')
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const readoutRef = useRef<HTMLElement>(null)
 
   const report = useMemo(() => (hasPack ? runCompliance(record) : null), [record, hasPack])
+
+  /**
+   * Motion that answers the person's action rather than decorating the page:
+   * when a brief is accepted, the readout blocks arrive in reading order so it
+   * is obvious what the tool just worked out, and in what sequence it matters —
+   * what it read, what is missing, what would stop it going to print.
+   */
+  useGSAP(
+    () => {
+      if (!extraction) return
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+      gsap.from('.readout-block, .handoff', {
+        opacity: 0,
+        y: 12,
+        duration: 0.5,
+        stagger: 0.07,
+        ease: 'power2.out',
+      })
+    },
+    { dependencies: [extraction], scope: readoutRef, revertOnUpdate: true },
+  )
 
   const submit = (brief: string) => {
     const value = brief.trim()
@@ -160,7 +186,7 @@ export function Chat({ record, dims, format, kit, onBrief, onOpenStudio, hasPack
         </div>
 
         {hasPack && extraction && (
-          <aside className="readout">
+          <aside className="readout" ref={readoutRef}>
             <section className="readout-block">
               <h2>What we read from your brief</h2>
               <dl className="found">

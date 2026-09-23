@@ -1,3 +1,9 @@
+import { useRef } from 'react'
+import gsap from 'gsap'
+import { useGSAP } from '@gsap/react'
+
+gsap.registerPlugin(useGSAP)
+
 interface Props {
   onStart: () => void
 }
@@ -10,8 +16,45 @@ interface Props {
  * produces. One motion moment on load, nothing else animates.
  */
 export function Landing({ onStart }: Props) {
+  const root = useRef<HTMLDivElement>(null)
+
+  /**
+   * The page's single orchestrated moment: the die line draws itself, then the
+   * safe areas fade up, then the copy rises.
+   *
+   * Each path is measured with getTotalLength() and given its own dash length,
+   * so a 30 mm crease and a 200 mm cut draw at the same speed. A fixed dash
+   * array — which is all CSS can do — makes short lines snap and long lines
+   * crawl. This is the reason the animation moved to GSAP.
+   */
+  useGSAP(
+    () => {
+      const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      const lines = gsap.utils.toArray<SVGPathElement>('.dh-cut path, .dh-crease path')
+
+      for (const path of lines) {
+        const len = path.getTotalLength()
+        gsap.set(path, { strokeDasharray: len, strokeDashoffset: len })
+      }
+
+      if (prefersReduced) {
+        gsap.set(lines, { strokeDashoffset: 0 })
+        gsap.set(['.dh-safe path', '.hero-copy > *'], { opacity: 1, y: 0 })
+        return
+      }
+
+      gsap
+        .timeline({ defaults: { ease: 'power2.out' } })
+        .to('.dh-cut path', { strokeDashoffset: 0, duration: 1.1, stagger: 0.045 })
+        .to('.dh-crease path', { strokeDashoffset: 0, duration: 0.8, stagger: 0.035 }, '-=0.75')
+        .from('.dh-safe path', { opacity: 0, duration: 0.5, stagger: 0.04 }, '-=0.3')
+        .from('.hero-copy > *', { opacity: 0, y: 14, duration: 0.7, stagger: 0.09 }, 0.15)
+    },
+    { scope: root },
+  )
+
   return (
-    <div className="landing">
+    <div className="landing" ref={root}>
       <header className="l-bar">
         <span className="wordmark">
           SF <em>Pack</em>
