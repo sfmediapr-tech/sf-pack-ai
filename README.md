@@ -129,6 +129,31 @@ In `vite dev` a procedural placeholder answers `/api/concept` instead, so the wh
 can be exercised without a key and without spending credits. It is a `apply: 'serve'`
 plugin and never reaches the production build.
 
+## Deploying
+
+```bash
+./deploy.sh
+```
+
+It deploys from a copy of the tree with `.git` removed, which is a workaround
+rather than good practice. When the CLI can see a git repository it sends the
+commit metadata, and Vercel refuses to build until the commit author matches a
+GitHub account **connected to the Vercel account**. Until that connection
+exists, every deploy returns "Deployment Blocked" with no build log at all —
+which is a slow thing to diagnose.
+
+The real fix is one of:
+
+- Vercel → Settings → **Login Connections** → connect GitHub. Then
+  `vercel deploy --prod` works directly and `vercel git connect` will link the
+  repo so pushes deploy themselves.
+- Or connect the repository in the Vercel dashboard, and stop deploying by CLI.
+
+Separately, **Deployment Protection** is on by default and puts every URL
+behind a Vercel login, including the production domain. Turn off *Vercel
+Authentication* under Settings → Deployment Protection or clients cannot open
+the link.
+
 ## Driving it from Claude Code
 
 `.claude/skills/sf-pack-ai/SKILL.md` teaches Claude to use this engine rather than

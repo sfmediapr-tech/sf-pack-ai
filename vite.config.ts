@@ -75,4 +75,17 @@ function placeholderSurface(w: number, h: number): string {
 export default defineConfig({
   plugins: [react(), conceptStub()],
   server: { port: 5178 },
+  build: {
+    rollupOptions: {
+      output: {
+        // Three.js is the bulk of the app and changes rarely; keeping it in
+        // its own chunk means a copy change to the studio does not invalidate
+        // 600 kB of cached geometry code.
+        manualChunks: {
+          three: ['three'],
+          gsap: ['gsap', '@gsap/react'],
+        },
+      },
+    },
+  },
 })

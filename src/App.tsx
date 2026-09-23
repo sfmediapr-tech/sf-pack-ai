@@ -1,11 +1,18 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import { formatMeta } from './core/dielines'
 import type { Dimensions, PackFormat, ProductRecord } from './core/types'
 import { KITS } from './sampleData'
 import { blankRecord } from './core/brief/blank'
-import { Chat } from './views/Chat'
 import { Landing } from './views/Landing'
-import { Studio } from './views/Studio'
+
+/**
+ * The landing page is the first thing a client loads, and it does not need a
+ * 3D engine to render a headline. Chat and Studio pull Three.js, GSAP's
+ * timeline work and the PDF writer with them, so both are split out and
+ * fetched only when someone actually opens the tool.
+ */
+const Chat = lazy(() => import('./views/Chat').then((m) => ({ default: m.Chat })))
+const Studio = lazy(() => import('./views/Studio').then((m) => ({ default: m.Studio })))
 import { decodeShare, initialShare, type ShareState } from './share/link'
 
 type View = 'landing' | 'chat' | 'studio'
@@ -72,6 +79,7 @@ export default function App() {
 
   if (view === 'studio') {
     return (
+      <Suspense fallback={<div className="booting" aria-busy="true" />}>
       <Studio
         record={record}
         setRecord={setRecord}
@@ -83,10 +91,12 @@ export default function App() {
         setKitName={setKitName}
         onExit={() => setView('chat')}
       />
+      </Suspense>
     )
   }
 
   return (
+    <Suspense fallback={<div className="booting" aria-busy="true" />}>
     <Chat
       record={record}
       dims={dims}
@@ -98,5 +108,6 @@ export default function App() {
       onReset={reset}
       shareState={shareState}
     />
+    </Suspense>
   )
 }
