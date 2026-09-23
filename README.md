@@ -79,6 +79,19 @@ the same typed operations, and is held to the same rule. That rule is the whole 
 well-known AI packaging tool, given "a UK food supplement pouch", returned a pack for an
 invented brand carrying an invented ingredient list. Neither is possible here.
 
+## Driving it from Claude Code
+
+`.claude/skills/sf-pack-ai/SKILL.md` teaches Claude to use this engine rather than
+reason about packaging in prose: fill a `ProductRecord` from a client email or a
+formulation document, run `runCompliance`, read the findings, route them to the named
+reviewer — and never write a value it cannot trace to a source. It also lists the traps
+this codebase has already been bitten by, including cut-versus-crease topology and the
+net-quantity unit failure.
+
+It complements the six process skills in
+`Digital Packaging_Project 1/packaging-agent/.claude/skills/`: those describe the process,
+this one runs the engine.
+
 ## Design
 
 The stage colour is the neutral grey of an ISO 3664 colour-viewing booth — the surround a
