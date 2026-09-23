@@ -9,6 +9,7 @@ import type { Dimensions, PackFormat, ProductRecord } from '../core/types'
 import { PackPreview } from '../three/PackPreview'
 import type { BrandKit } from '../three/artwork'
 import { generateConcept, type ConceptResult } from '../concept/client'
+import { copyToClipboard, shareUrl, type ShareState } from '../share/link'
 
 gsap.registerPlugin(useGSAP)
 
@@ -22,6 +23,8 @@ interface Props {
   /** True once a brief has been accepted and there is a pack to look at. */
   hasPack: boolean
   onReset: () => void
+  /** Current pack state, read lazily so the link is always up to date. */
+  shareState: () => ShareState
 }
 
 const STARTERS = [
@@ -30,7 +33,7 @@ const STARTERS = [
   'Single-serve stick pack, 30 × 120 mm, for the EU. Brand Lumen, called Morning Electrolyte.',
 ]
 
-export function Chat({ record, dims, format, kit, onBrief, onOpenStudio, hasPack, onReset }: Props) {
+export function Chat({ record, dims, format, kit, onBrief, onOpenStudio, hasPack, onReset, shareState }: Props) {
   const [text, setText] = useState('')
   const [extraction, setExtraction] = useState<Extraction | null>(null)
   const [art, setArt] = useState<HTMLImageElement | null>(null)
@@ -38,6 +41,7 @@ export function Chat({ record, dims, format, kit, onBrief, onOpenStudio, hasPack
   const [artNote, setArtNote] = useState('')
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const readoutRef = useRef<HTMLElement>(null)
+  const [shared, setShared] = useState<'idle' | 'copied' | 'failed'>('idle')
 
   const report = useMemo(() => (hasPack ? runCompliance(record) : null), [record, hasPack])
 
@@ -91,6 +95,12 @@ export function Chat({ record, dims, format, kit, onBrief, onOpenStudio, hasPack
     setArtNote('')
   }
 
+  const share = async () => {
+    const url = await shareUrl(shareState())
+    setShared((await copyToClipboard(url)) ? 'copied' : 'failed')
+    setTimeout(() => setShared('idle'), 2600)
+  }
+
   const makeArt = async () => {
     setArtState('working')
     setArtNote('')
@@ -127,6 +137,9 @@ export function Chat({ record, dims, format, kit, onBrief, onOpenStudio, hasPack
           <div className="chat-bar-actions">
             <button className="ghost-btn" onClick={onReset}>
               Start again
+            </button>
+            <button className="ghost-btn" onClick={() => void share()}>
+              {shared === 'copied' ? 'Link copied' : shared === 'failed' ? 'Copy failed' : 'Copy link'}
             </button>
             <button className="solid-btn" onClick={onOpenStudio}>
               Open in studio
@@ -185,8 +198,12 @@ export function Chat({ record, dims, format, kit, onBrief, onOpenStudio, hasPack
           )}
         </div>
 
-        {hasPack && extraction && (
+        {hasPack && (
           <aside className="readout" ref={readoutRef}>
+            {/* Only shown when a brief was typed in this session. Someone
+                opening a shared link did not write one, but still needs
+                everything below it. */}
+            {extraction && (
             <section className="readout-block">
               <h2>What we read from your brief</h2>
               <dl className="found">
@@ -203,8 +220,9 @@ export function Chat({ record, dims, format, kit, onBrief, onOpenStudio, hasPack
                   ))}
               </dl>
             </section>
+            )}
 
-            {extraction.gaps.length > 0 && (
+            {extraction && extraction.gaps.length > 0 && (
               <section className="readout-block">
                 <h2>Still needed before this can go anywhere</h2>
                 <ol className="gaps">

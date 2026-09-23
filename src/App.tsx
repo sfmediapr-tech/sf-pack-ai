@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { formatMeta } from './core/dielines'
 import type { Dimensions, PackFormat, ProductRecord } from './core/types'
 import { KITS } from './sampleData'
@@ -6,6 +6,7 @@ import { blankRecord } from './core/brief/blank'
 import { Chat } from './views/Chat'
 import { Landing } from './views/Landing'
 import { Studio } from './views/Studio'
+import { decodeShare, initialShare, type ShareState } from './share/link'
 
 type View = 'landing' | 'chat' | 'studio'
 
@@ -16,8 +17,38 @@ export default function App() {
   const [dims, setDims] = useState<Dimensions>(formatMeta('stand-up-pouch').defaults)
   const [kitName, setKitName] = useState('Premium dark')
   const [hasPack, setHasPack] = useState(false)
+  const [restoring, setRestoring] = useState(true)
 
   const kit = useMemo(() => KITS[kitName], [kitName])
+
+  // A shared link opens straight onto that pack, skipping the landing page —
+  // the person following it was sent a specific pack, not an advert.
+  useEffect(() => {
+    // The URL was already read and stripped at module load; this only decodes.
+    const payload = initialShare()
+    if (!payload) {
+      setRestoring(false)
+      return
+    }
+    let live = true
+    void decodeShare(payload).then((shared) => {
+      if (!live) return
+      if (shared) {
+        setRecord(shared.record)
+        setFormat(shared.format)
+        setDims(shared.dims)
+        if (KITS[shared.kit]) setKitName(shared.kit)
+        setHasPack(true)
+        setView('chat')
+      }
+      setRestoring(false)
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const shareState = (): ShareState => ({ v: 1, record, format, dims, kit: kitName })
 
   const acceptBrief = (r: ProductRecord, f: PackFormat, d: Dimensions) => {
     setRecord(r)
@@ -32,6 +63,10 @@ export default function App() {
     setDims(formatMeta('stand-up-pouch').defaults)
     setHasPack(false)
   }
+
+  // Nothing renders until the link has been read, so a shared pack never
+  // flashes the landing page first.
+  if (restoring) return <div className="booting" aria-busy="true" />
 
   if (view === 'landing') return <Landing onStart={() => setView('chat')} />
 
@@ -61,6 +96,7 @@ export default function App() {
       onBrief={acceptBrief}
       onOpenStudio={() => setView('studio')}
       onReset={reset}
+      shareState={shareState}
     />
   )
 }

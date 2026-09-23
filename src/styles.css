@@ -606,3 +606,7 @@ input[type=range] { width: 100%; accent-color: var(--crease); }
   color: var(--pencil); background: var(--pencil-bg);
   padding: 9px 11px; border-radius: var(--r-control);
 }
+
+/* Held blank while a shared link is decoded, so a shared pack never flashes
+   the landing page on its way in. */
+.booting { height: 100%; background: var(--ground); }
