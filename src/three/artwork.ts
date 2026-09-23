@@ -33,6 +33,22 @@ const PPMM = 12
 const font = (tpl: string, size: number, weight = 400) =>
   tpl.replace('{size}', String(size)).replace('{weight}', String(weight))
 
+/** Draw an image to fill the box, cropping the overflow rather than squashing. */
+function drawCover(c: CanvasRenderingContext2D, img: HTMLImageElement, W: number, H: number) {
+  const scale = Math.max(W / img.width, H / img.height)
+  const w = img.width * scale
+  const h = img.height * scale
+  c.drawImage(img, (W - w) / 2, (H - h) / 2, w, h)
+}
+
+/** Hex to rgba, so a brand colour can be used as a scrim at a given opacity. */
+function withAlpha(hex: string, alpha: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!m) return `rgba(0,0,0,${alpha})`
+  const n = parseInt(m[1], 16)
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
+}
+
 function roundRect(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   c.beginPath()
   c.moveTo(x + r, y)
@@ -94,6 +110,11 @@ export interface PanelArtOptions {
   /** Draw the safe-area and bleed guides over the art. */
   showGuides?: boolean
   safeMm?: number
+  /**
+   * A generated surface graphic, drawn underneath everything else. It carries
+   * no text of its own — every word on the pack is set below, from the record.
+   */
+  background?: HTMLImageElement | null
 }
 
 /**
@@ -118,6 +139,20 @@ export async function renderPanelArt(o: PanelArtOptions): Promise<HTMLCanvasElem
   // Background
   c.fillStyle = bg
   c.fillRect(0, 0, W, H)
+
+  // A generated surface graphic goes down first, cover-fitted, with a scrim of
+  // the brand colour over it. The scrim is not decoration: type set over an
+  // unmodified generated image is unreadable at pack size, and legibility of
+  // the mandatory particulars is a legal requirement, not a preference.
+  if (o.background && role === 'front') {
+    drawCover(c, o.background, W, H)
+    const scrim = c.createLinearGradient(0, 0, 0, H)
+    scrim.addColorStop(0, withAlpha(kit.primary, dark ? 0.82 : 0.7))
+    scrim.addColorStop(0.5, withAlpha(kit.primary, dark ? 0.62 : 0.5))
+    scrim.addColorStop(1, withAlpha(kit.primary, dark ? 0.88 : 0.78))
+    c.fillStyle = scrim
+    c.fillRect(0, 0, W, H)
+  }
 
   if (kit.style === 'botanical') {
     const g = c.createLinearGradient(0, 0, 0, H)

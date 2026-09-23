@@ -79,6 +79,40 @@ the same typed operations, and is held to the same rule. That rule is the whole 
 well-known AI packaging tool, given "a UK food supplement pouch", returned a pack for an
 invented brand carrying an invented ingredient list. Neither is possible here.
 
+## Concept art
+
+The image model makes the **surface graphic only**. It never contributes a word: every
+line of type on the pack is set from the product record and printed over the top, and the
+prompt explicitly forbids text, lettering, logos, packaging and product photography.
+
+That distinction is the entire design. Ask a model for "a supplement pouch" and you get a
+photograph of a pouch with an invented brand and an invented ingredient list — which is
+what the market leader actually returns. Ask for the decorative surface only, and you get
+something that maps onto geometry this codebase computed, underneath type a human
+supplied.
+
+The generated image is drawn cover-fitted and then covered with a scrim of the brand
+colour. The scrim is not styling: type set over an unmodified generated image is
+unreadable at pack size, and legibility of the mandatory particulars is a legal
+requirement.
+
+```
+prompt (core/concept/prompt.ts, pure)
+   → POST /api/concept          ← server side; the API key never reaches the browser
+   → provider (fal.ai | Replicate)
+   → image fetched and returned as a data URL   ← a cross-origin image would taint
+   → cover-fit, scrim, then real type on top       the canvas and WebGL would refuse it
+```
+
+**To switch it on:** add `FAL_KEY` (or `REPLICATE_API_TOKEN`) to the Vercel project's
+environment variables and redeploy. See `.env.example`. With no key the app works exactly
+as before and says so in the interface — a missing provider is a normal state, not an
+error.
+
+In `vite dev` a procedural placeholder answers `/api/concept` instead, so the whole path
+can be exercised without a key and without spending credits. It is a `apply: 'serve'`
+plugin and never reaches the production build.
+
 ## Driving it from Claude Code
 
 `.claude/skills/sf-pack-ai/SKILL.md` teaches Claude to use this engine rather than

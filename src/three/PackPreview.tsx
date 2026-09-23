@@ -11,6 +11,8 @@ interface Props {
   kit: BrandKit
   showGuides: boolean
   spin: boolean
+  /** Generated surface graphic, composited under the type on the front face. */
+  background?: HTMLImageElement | null
 }
 
 /**
@@ -18,7 +20,7 @@ interface Props {
  * the whole scene is rebuilt only when geometry or artwork actually changes,
  * and the drag/zoom is a dozen lines, so there is nothing else to keep in sync.
  */
-export function PackPreview({ format, dims, product, kit, showGuides, spin }: Props) {
+export function PackPreview({ format, dims, product, kit, showGuides, spin, background = null }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const state = useRef<{
     renderer?: THREE.WebGLRenderer
@@ -223,6 +225,7 @@ export function PackPreview({ format, dims, product, kit, showGuides, spin }: Pr
           kit,
           showGuides,
           safeMm: dims.safeMargin,
+          background,
         })
         if (cancelled) return
         const tex = new THREE.CanvasTexture(canvas)
@@ -245,7 +248,7 @@ export function PackPreview({ format, dims, product, kit, showGuides, spin }: Pr
     return () => {
       cancelled = true
     }
-  }, [format, dims, product, kit, showGuides])
+  }, [format, dims, product, kit, showGuides, background])
 
   return <div ref={host} style={{ width: '100%', height: '100%', minHeight: 320 }} />
 }
