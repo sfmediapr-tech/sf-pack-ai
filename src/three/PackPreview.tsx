@@ -226,6 +226,7 @@ export function PackPreview({ format, dims, product, kit, showGuides, spin, back
           showGuides,
           safeMm: dims.safeMargin,
           background,
+          wrap: format === 'jar-wrap-label' || format === 'bottle-wrap-label',
         })
         if (cancelled) return
         const tex = new THREE.CanvasTexture(canvas)

@@ -116,6 +116,11 @@ export interface PanelArtOptions {
    * no text of its own — every word on the pack is set below, from the record.
    */
   background?: HTMLImageElement | null
+  /**
+   * A wrap-around label is one continuous panel with no back, so front and
+   * back content share it, laid out in thirds the way a real jar label is.
+   */
+  wrap?: boolean
 }
 
 /**
@@ -176,7 +181,9 @@ export async function renderPanelArt(o: PanelArtOptions): Promise<HTMLCanvasElem
   // Facts panel occupies a column on the left of the back; body copy runs beside it.
   const panelWMm = Math.max(34, Math.min(wMm * 0.45, 72))
 
-  if (role === 'front') {
+  if (o.wrap) {
+    drawWrap(c, W, H, M, p, kit, fg, dark)
+  } else if (role === 'front') {
     drawFront(c, W, H, M, p, kit, fg)
   } else if (role === 'back') {
     drawBackChrome(c, W, H, M, p, kit, panelWMm)
@@ -187,7 +194,17 @@ export async function renderPanelArt(o: PanelArtOptions): Promise<HTMLCanvasElem
   }
 
   // The facts panel is the real generated SVG, composited at true size.
-  if (role === 'back') {
+  if (o.wrap) {
+    const zoneMm = wMm / 3
+    const res = renderFactsPanel(p, Math.min(zoneMm - 10, 64))
+    const maxH = hMm - 12
+    const scale = res.heightMm > maxH ? maxH / res.heightMm : 1
+    try {
+      await drawSvg(c, res.svg, 5 * PPMM, 6 * PPMM, res.widthMm * scale, res.heightMm * scale)
+    } catch {
+      /* the zone is already labelled */
+    }
+  } else if (role === 'back') {
     const res = renderFactsPanel(p, panelWMm)
     const maxH = hMm - 26
     const scale = res.heightMm > maxH ? maxH / res.heightMm : 1
@@ -203,15 +220,16 @@ export async function renderPanelArt(o: PanelArtOptions): Promise<HTMLCanvasElem
   // The real barcode, generated from the GTIN and composited at true size.
   // It is a decodable symbol with correct quiet zones, not an illustration —
   // so what the client approves in 3D is what a scanner would read.
-  if (role === 'back') {
+  if (role === 'back' || o.wrap) {
     const bar = renderBarcode(p.gtin, DEFAULT_SPEC)
     if (!('error' in bar)) {
-      const maxW = Math.min(wMm * 0.34, 38)
+      const maxW = o.wrap ? Math.min(wMm / 3 - 12, 38) : Math.min(wMm * 0.34, 38)
       const scale = bar.widthMm > maxW ? maxW / bar.widthMm : 1
       const bwMm = bar.widthMm * scale
       const bhMm = bar.heightMm * scale
+      const bx = o.wrap ? (wMm * 2) / 3 + 6 : wMm - 4 - bwMm
       try {
-        await drawSvg(c, bar.svg, (wMm - 4 - bwMm) * PPMM, (hMm - 4 - bhMm) * PPMM, bwMm, bhMm)
+        await drawSvg(c, bar.svg, bx * PPMM, (hMm - 4 - bhMm) * PPMM, bwMm, bhMm)
       } catch {
         /* the reserved box drawn above already says a GTIN is needed */
       }
@@ -412,6 +430,99 @@ function drawBackChrome(
   c.fillStyle = 'rgba(0,0,0,0.55)'
   c.font = font(kit.bodyFont, 2.3 * PPMM, 400)
   c.fillText('LOT / BBE — keep clear', M + 1.2 * PPMM, H - M - lh / 2 + 0.8 * PPMM)
+}
+
+/**
+ * A wrap-around label, laid out the way a real jar label is: the facts panel
+ * on the left third, the brand face in the middle third (which is what faces
+ * the shelf), and directions, warnings and the barcode on the right third.
+ *
+ * Treating the wrap as a front-only panel — which is what this did before —
+ * silently drops the facts panel and the barcode from the commonest supplement
+ * format there is.
+ */
+function drawWrap(
+  c: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  M: number,
+  p: ProductRecord,
+  kit: BrandKit,
+  fg: string,
+  dark: boolean,
+) {
+  const zone = W / 3
+
+  // Left and right thirds are light, so the panel and the barcode are legible;
+  // the middle third keeps the brand ground.
+  c.fillStyle = kit.paper
+  c.fillRect(0, 0, zone, H)
+  c.fillRect(zone * 2, 0, zone, H)
+
+  // Hairlines where the zones meet, which is where the eye leaves the face.
+  c.strokeStyle = dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.12)'
+  c.lineWidth = 1.5
+  for (const x of [zone, zone * 2]) {
+    c.beginPath()
+    c.moveTo(x, 0)
+    c.lineTo(x, H)
+    c.stroke()
+  }
+
+  // Middle third: the shelf face.
+  c.save()
+  c.translate(zone, 0)
+  c.beginPath()
+  c.rect(0, 0, zone, H)
+  c.clip()
+  drawFront(c, zone, H, M, p, kit, fg)
+  c.restore()
+
+  // Right third: directions, warnings, storage, responsible party.
+  c.save()
+  c.translate(zone * 2 + 5 * PPMM, 0)
+  let y = 9 * PPMM
+  const colW = zone - 10 * PPMM
+  const body = 2.7 * PPMM
+  c.fillStyle = '#101418'
+
+  const heading = (t: string) => {
+    c.font = font(kit.bodyFont, body, 700)
+    c.fillStyle = kit.primary
+    c.fillText(t, 0, y)
+    c.fillStyle = '#101418'
+    y += body * 1.5
+  }
+  const para = (t: string) => {
+    c.font = font(kit.bodyFont, body, 400)
+    for (const ln of wrapText(c, t, colW)) {
+      c.fillText(ln, 0, y)
+      y += body * 1.3
+    }
+    y += body * 0.5
+  }
+
+  if (p.directions) {
+    heading('Directions')
+    para(p.directions)
+  }
+  if (p.warnings.length) {
+    heading('Warnings')
+    for (const w of p.warnings) para(w)
+  }
+  if (p.storage) para(p.storage)
+  if (p.responsibleParty) {
+    y += body * 0.6
+    c.font = font(kit.bodyFont, body * 0.92, 700)
+    c.fillText(p.responsibleParty.name, 0, y)
+    y += body * 1.2
+    c.font = font(kit.bodyFont, body * 0.92, 400)
+    for (const l of [...p.responsibleParty.lines, p.responsibleParty.country]) {
+      c.fillText(l, 0, y)
+      y += body * 1.2
+    }
+  }
+  c.restore()
 }
 
 function drawSide(
