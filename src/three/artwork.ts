@@ -1,5 +1,6 @@
 import type { ProductRecord } from '../core/types'
 import { renderFactsPanel } from '../core/panels/factsPanel'
+import { DEFAULT_SPEC, renderBarcode } from '../core/barcode/symbol'
 
 export interface BrandKit {
   primary: string
@@ -199,6 +200,24 @@ export async function renderPanelArt(o: PanelArtOptions): Promise<HTMLCanvasElem
     }
   }
 
+  // The real barcode, generated from the GTIN and composited at true size.
+  // It is a decodable symbol with correct quiet zones, not an illustration —
+  // so what the client approves in 3D is what a scanner would read.
+  if (role === 'back') {
+    const bar = renderBarcode(p.gtin, DEFAULT_SPEC)
+    if (!('error' in bar)) {
+      const maxW = Math.min(wMm * 0.34, 38)
+      const scale = bar.widthMm > maxW ? maxW / bar.widthMm : 1
+      const bwMm = bar.widthMm * scale
+      const bhMm = bar.heightMm * scale
+      try {
+        await drawSvg(c, bar.svg, (wMm - 4 - bwMm) * PPMM, (hMm - 4 - bhMm) * PPMM, bwMm, bhMm)
+      } catch {
+        /* the reserved box drawn above already says a GTIN is needed */
+      }
+    }
+  }
+
   if (o.showGuides && o.safeMm) {
     const s = o.safeMm * PPMM
     c.strokeStyle = 'rgba(0,184,148,0.9)'
@@ -368,20 +387,10 @@ function drawBackChrome(
   const bh = bw * 0.56
   const bx = W - M - bw
   const by = H - M - bh
-  c.fillStyle = '#fff'
-  c.fillRect(bx, by, bw, bh)
   const digits = (p.gtin ?? '').replace(/\s/g, '')
-  if (/^\d{12,13}$/.test(digits)) {
-    c.fillStyle = '#000'
-    const barW = (bw - 4 * PPMM) / (digits.length * 7)
-    let x = bx + 2 * PPMM
-    for (let i = 0; i < digits.length * 7; i++) {
-      if ((Number(digits[Math.floor(i / 7)]) * 7 + i) % 3 !== 0) c.fillRect(x, by, barW, bh - 4 * PPMM)
-      x += barW
-    }
-    c.font = font(kit.bodyFont, 2.6 * PPMM, 400)
-    c.fillText(digits, bx + 2 * PPMM, by + bh - 0.6 * PPMM)
-  } else {
+  if (!/^\d{12,13}$/.test(digits)) {
+    // No usable GTIN: reserve the footprint and say so, rather than drawing
+    // something barcode-shaped that would never scan.
     c.strokeStyle = '#b00020'
     c.setLineDash([6, 5])
     c.lineWidth = 3
