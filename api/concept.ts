@@ -11,7 +11,26 @@
  * in use.
  */
 
-export const config = { runtime: 'nodejs' }
+/**
+ * Vercel's Node runtime invokes handlers as (req, res). A Web-style
+ * `Request => Response` handler is accepted without complaint and its return
+ * value is then discarded, so the response is never written and the request
+ * hangs until the platform kills it. Hence the classic signature.
+ */
+export const config = { maxDuration: 60 }
+
+/** The parts of Vercel's request and response we actually use. */
+interface VercelRequest {
+  method?: string
+  body?: unknown
+  on(event: 'data' | 'end' | 'error', cb: (chunk?: never) => void): void
+  setEncoding(enc: string): void
+}
+interface VercelResponse {
+  status(code: number): VercelResponse
+  setHeader(name: string, value: string): void
+  json(body: unknown): void
+}
 
 interface ConceptRequest {
   prompt: string
@@ -29,45 +48,124 @@ interface GeneratedImage {
 const MAX_PROMPT = 2000
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 
-export default async function handler(req: Request): Promise<Response> {
-  if (req.method !== 'POST') return json({ error: 'Use POST.' }, 405)
+export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
+  const send = (body: unknown, status = 200) => {
+    res.setHeader('Content-Type', 'application/json')
+    res.setHeader('Cache-Control', 'no-store')
+    res.status(status).json(body)
+  }
+
+  if (req.method !== 'POST') return send({ error: 'Use POST.' }, 405)
 
   let body: ConceptRequest
   try {
-    body = (await req.json()) as ConceptRequest
+    body = await readJsonBody(req)
   } catch {
-    return json({ error: 'Body must be JSON.' }, 400)
+    return send({ error: 'Body must be JSON.' }, 400)
   }
 
   const prompt = (body.prompt ?? '').trim()
-  if (!prompt) return json({ error: 'A prompt is required.' }, 400)
-  if (prompt.length > MAX_PROMPT) return json({ error: `Prompt over ${MAX_PROMPT} characters.` }, 400)
+  if (!prompt) return send({ error: 'A prompt is required.' }, 400)
+  if (prompt.length > MAX_PROMPT) return send({ error: `Prompt over ${MAX_PROMPT} characters.` }, 400)
 
   const width = clamp(body.size?.width ?? 1024, 512, 1536)
   const height = clamp(body.size?.height ?? 1024, 512, 1536)
 
+  const cfAccount = process.env.CLOUDFLARE_ACCOUNT_ID
+  const cfToken = process.env.CLOUDFLARE_API_TOKEN
   const fal = process.env.FAL_KEY
   const replicate = process.env.REPLICATE_API_TOKEN
 
+  // Cheapest first. Cloudflare's free allowance covers ordinary use, so an
+  // explicit IMAGE_PROVIDER is the only way to reach a paid one while it works.
+  const preferred = process.env.IMAGE_PROVIDER?.toLowerCase()
+
   try {
-    if (fal) {
-      return json(await viaFal(fal, prompt, body.negativePrompt, width, height))
+    if ((!preferred || preferred === 'cloudflare') && cfAccount && cfToken) {
+      return send(await viaCloudflare(cfAccount, cfToken, prompt))
     }
-    if (replicate) {
-      return json(await viaReplicate(replicate, prompt, body.negativePrompt, width, height))
+    if ((!preferred || preferred === 'fal') && fal) {
+      return send(await viaFal(fal, prompt, body.negativePrompt, width, height))
+    }
+    if ((!preferred || preferred === 'replicate') && replicate) {
+      return send(await viaReplicate(replicate, prompt, body.negativePrompt, width, height))
     }
     // No key is a normal state, not a crash: the app renders brand-kit artwork
     // without generated imagery, and says so.
-    return json(
+    return send(
       {
         error: 'no-provider',
         message:
-          'No image provider configured. Set FAL_KEY (or REPLICATE_API_TOKEN) in the Vercel project environment to enable concept art.',
+          'No image provider configured. Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN (free tier), or FAL_KEY, or REPLICATE_API_TOKEN, in the Vercel project environment.',
       },
       501,
     )
   } catch (e) {
-    return json({ error: 'provider-failed', message: e instanceof Error ? e.message : String(e) }, 502)
+    return send({ error: 'provider-failed', message: e instanceof Error ? e.message : String(e) }, 502)
+  }
+}
+
+/** Vercel parses a JSON body for us, but fall back to the stream if it did not. */
+async function readJsonBody(req: VercelRequest): Promise<ConceptRequest> {
+  if (req.body && typeof req.body === 'object') return req.body as ConceptRequest
+  if (typeof req.body === 'string') return JSON.parse(req.body) as ConceptRequest
+  const raw = await new Promise<string>((resolve, reject) => {
+    let d = ''
+    req.setEncoding('utf8')
+    req.on('data', (c) => (d += c))
+    req.on('end', () => resolve(d))
+    req.on('error', () => reject(new Error('stream error')))
+  })
+  return JSON.parse(raw || '{}') as ConceptRequest
+}
+
+// ── Cloudflare Workers AI ─────────────────────────────────────────────────
+/**
+ * The free option, and the default.
+ *
+ * 10,000 Neurons a day at no charge, which at roughly 58 Neurons for a
+ * 1024x1024 four-step image is about 170 images a day — far more than a
+ * packaging job needs.
+ *
+ * The model is FLUX.1 [schnell], and that specific variant matters: schnell is
+ * Apache 2.0, so it is free to use on paid client work. FLUX.1 [dev] is not —
+ * commercial use of dev needs a licence from Black Forest Labs. A contract
+ * manufacturer generating artwork for customers is squarely commercial use, so
+ * this codebase only ever names schnell.
+ *
+ * This endpoint takes a prompt and a step count and returns a fixed square
+ * image; it has no size or negative-prompt parameters, which is why the prompt
+ * itself is written to exclude text rather than relying on a negative.
+ */
+async function viaCloudflare(accountId: string, token: string, prompt: string): Promise<GeneratedImage> {
+  const model = process.env.CLOUDFLARE_MODEL ?? '@cf/black-forest-labs/flux-1-schnell'
+  const steps = clamp(Number(process.env.CLOUDFLARE_STEPS ?? 4), 1, 8)
+
+  const res = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, steps }),
+    },
+  )
+  if (!res.ok) throw new Error(`Cloudflare ${res.status}: ${(await res.text()).slice(0, 300)}`)
+
+  const data = (await res.json()) as {
+    result?: { image?: string }
+    success?: boolean
+    errors?: { message: string }[]
+  }
+  if (data.errors?.length) throw new Error(`Cloudflare: ${data.errors.map((e) => e.message).join('; ')}`)
+
+  const b64 = data.result?.image
+  if (!b64) throw new Error('Cloudflare returned no image')
+  return {
+    // Already base64 — no second fetch, so nothing to taint the canvas.
+    dataUrl: `data:image/jpeg;base64,${b64}`,
+    provider: 'cloudflare',
+    model,
+    bytes: Math.round((b64.length * 3) / 4),
   }
 }
 
@@ -149,8 +247,3 @@ async function toDataUrl(url: string): Promise<string> {
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(n)))
 
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-  })

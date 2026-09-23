@@ -104,10 +104,26 @@ prompt (core/concept/prompt.ts, pure)
    → cover-fit, scrim, then real type on top       the canvas and WebGL would refuse it
 ```
 
-**To switch it on:** add `FAL_KEY` (or `REPLICATE_API_TOKEN`) to the Vercel project's
-environment variables and redeploy. See `.env.example`. With no key the app works exactly
-as before and says so in the interface — a missing provider is a normal state, not an
-error.
+### Providers, cheapest first
+
+| Provider | Cost | Model |
+|---|---|---|
+| **Cloudflare Workers AI** (default) | **Free** — 10,000 Neurons/day, no card. About 58 Neurons per 1024×1024 four-step image, so roughly **170 images a day**. | FLUX.1 [schnell] |
+| fal.ai | Paid per image | FLUX.1 [schnell] |
+| Replicate | Paid per image | FLUX.1 [schnell] |
+
+Auto-detected in that order; pin one with `IMAGE_PROVIDER`.
+
+**The licence matters more than the price.** FLUX.1 **[schnell]** is Apache 2.0, so it is
+free to use on paid client work. FLUX.1 **[dev]** is not — commercial use needs a licence
+from Black Forest Labs, and a contract manufacturer producing artwork for customers is
+squarely commercial use. This codebase only ever names schnell, and any model you
+substitute should be checked the same way.
+
+**To switch it on:** add `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` to the Vercel
+project's environment variables (Production scope) and redeploy. See `.env.example`. With
+no key the app works exactly as before and says so in the interface — a missing provider
+is a normal state, not an error.
 
 In `vite dev` a procedural placeholder answers `/api/concept` instead, so the whole path
 can be exercised without a key and without spending credits. It is a `apply: 'serve'`
